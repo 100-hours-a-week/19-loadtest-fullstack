@@ -30,7 +30,7 @@ const UserSchema = new mongoose.Schema({
     type: String,
     required: [true, '비밀번호는 필수 입력 항목입니다.'],
     minlength: [6, '비밀번호는 6자 이상이어야 합니다.'],
-    select: false
+    select: true
   },
   profileImage: {
     type: String,

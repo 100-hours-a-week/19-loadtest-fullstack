@@ -266,7 +266,7 @@ class AuthService {
       }
 
       const response = await axios.put(
-        `${API_URL}/api/users/profile`,
+        `${API_URL}/api/users/change-password`,
         {
           currentPassword,
           newPassword
@@ -303,7 +303,7 @@ class AuthService {
           throw new Error('인증이 만료되었습니다. 다시 로그인해주세요.');
         }
       }
-
+      console.error('Password change error2:', error);
       throw this._handleError(error);
     }
   }  
