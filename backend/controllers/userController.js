@@ -312,8 +312,8 @@ exports.changePassword = async (req, res) => {
         message: '사용자를 찾을 수 없습니다.'
       });
     }
-
-    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    // 3. 현재 비밀번호 확인
+    const isMatch = await user.matchPassword(currentPassword);
     if (!isMatch) {
       return res.status(401).json({
         success: false,
@@ -321,8 +321,7 @@ exports.changePassword = async (req, res) => {
       });
     }
 
-    const salt = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(newPassword, salt);
+    user.password = newPassword;
     await user.save();
     
     res.json({
