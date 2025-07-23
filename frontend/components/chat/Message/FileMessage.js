@@ -6,7 +6,7 @@ import {
   CorrectOutlineIcon as CheckCheck, 
   CorrectOutlineIcon as Check, 
   MusicIcon as Music, 
-  ExternalLinkIcon as ExternalLink, 
+  LinkOutlineIcon as ExternalLink,
   DownloadIcon as Download,
   ErrorCircleIcon as AlertCircle 
 } from '@vapor-ui/icons';
@@ -213,7 +213,7 @@ const FileMessage = ({
     const originalname = getDecodedFilename(msg.file?.originalname || 'Unknown File');
     const size = fileService.formatFileSize(msg.file?.size || 0);
     
-    const FileActions = () => (
+    const FileActions = ({ handleViewInNewTab, handleFileDownload }) => (
       <div className="file-actions mt-2 pt-2 border-t border-gray-200">
         <Button
           size="sm"
