@@ -18,12 +18,12 @@ jobs:
         with:
           node-version: 18
 
-      - name: 🧪 Create .env
+      - name: 🧪 Create .env.production
         working-directory: frontend
         run: |
-          echo "NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}" >> .env
-          echo "NEXT_PUBLIC_ENCRYPTION_KEY=${{ secrets.NEXT_PUBLIC_ENCRYPTION_KEY }}" >> .env
-          echo "NEXT_PUBLIC_PASSWORD_SALT=${{ secrets.NEXT_PUBLIC_PASSWORD_SALT }}" >> .env
+          echo "NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}" >> .env.procduction
+          echo "NEXT_PUBLIC_ENCRYPTION_KEY=${{ secrets.NEXT_PUBLIC_ENCRYPTION_KEY }}" >> .env.production
+          echo "NEXT_PUBLIC_PASSWORD_SALT=${{ secrets.NEXT_PUBLIC_PASSWORD_SALT }}" >> .env.production
 
       - name: 📥 Install dependencies
         working-directory: frontend
