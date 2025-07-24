@@ -102,7 +102,7 @@ const FileMessage = ({
     e.preventDefault();
     e.stopPropagation();
     setError(null);
-    
+    console.log('File download initiated:');
     try {
       if (!msg.file?.filename) {
         throw new Error('파일 정보가 없습니다.');
@@ -208,7 +208,7 @@ const FileMessage = ({
     }
   };
 
-  const renderFilePreview = () => {
+  const renderFilePreview = (handleViewInNewTab, handleFileDownload) => {
     const mimetype = msg.file?.mimetype || '';
     const originalname = getDecodedFilename(msg.file?.originalname || 'Unknown File');
     const size = fileService.formatFileSize(msg.file?.size || 0);
@@ -224,6 +224,7 @@ const FileMessage = ({
           <ExternalLink size={16} />
           <span>새 탭에서 보기</span>
         </Button>
+
         <Button
           size="sm"
           variant="outline"
@@ -251,7 +252,10 @@ const FileMessage = ({
               <span className="text-sm text-muted">{size}</span>
             </div>
           </div>
-          <FileActions />
+          <FileActions 
+            handleViewInNewTab={handleViewInNewTab}
+            handleFileDownload={handleFileDownload}
+          />
         </div>
       );
     }
@@ -356,7 +360,7 @@ const FileMessage = ({
                 </Button>
               </Callout>
             )}
-            {renderFilePreview()}
+            {renderFilePreview(handleViewInNewTab, handleFileDownload)}
             {msg.content && (
               <div className="mt-3">
                 <MessageContent content={msg.content} />
