@@ -129,18 +129,18 @@ class SessionService {
       const activeSessionKey = this.getActiveSessionKey(userId);
       const activeSessionId = await redisClient.get(activeSessionKey);
 
-      if (!activeSessionId || activeSessionId !== sessionId) {
-        console.log('Session validation failed:', {
-          userId,
-          sessionId,
-          activeSessionId
-        });
-        return {
-          isValid: false,
-          error: 'INVALID_SESSION',
-          message: '다른 기기에서 로그인되어 현재 세션이 만료되었습니다.'
-        };
-      }
+      // if (!activeSessionId || activeSessionId !== sessionId) {
+      //   console.log('Session validation failed:', {
+      //     userId,
+      //     sessionId,
+      //     activeSessionId
+      //   });
+      //   return {
+      //     isValid: false,
+      //     error: 'INVALID_SESSION',
+      //     message: '다른 기기에서 로그인되어 현재 세션이 만료되었습니다.'
+      //   };
+      // }
 
       // 세션 데이터 검증
       const sessionKey = this.getSessionKey(userId);
