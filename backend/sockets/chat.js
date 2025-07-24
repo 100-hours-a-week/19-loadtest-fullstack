@@ -6,7 +6,7 @@ const jwt = require('jsonwebtoken');
 const { jwtSecret } = require('../config/keys');
 const redisClient = require('../utils/redisClient');
 const SessionService = require('../services/sessionService');
-const aiService = require('../services/aiService');
+const AIService = require('../services/aiService');
 
 module.exports = function(io) {
   const connectedUsers = new Map();
@@ -14,6 +14,8 @@ module.exports = function(io) {
   const userRooms = new Map();
   const messageQueues = new Map();
   const messageLoadRetries = new Map();
+  const aiService = new AIService();
+  
   const BATCH_SIZE = 30;  // 한 번에 로드할 메시지 수
   const LOAD_DELAY = 300; // 메시지 로드 딜레이 (ms)
   const MAX_RETRIES = 3;  // 최대 재시도 횟수
@@ -181,6 +183,308 @@ module.exports = function(io) {
       throw error;
     }
   };
+
+  // 사용자 ID로 소켓 찾기
+  function findSocketByUserId(userId) {
+    for (const [socketId, socket] of io.sockets.sockets) {
+      if (socket.user && socket.user.id === userId) {
+        return socket;
+      }
+    }
+    return null;
+  }
+
+  // AI 멘션 추출 함수
+  function extractAIMentions(content) {
+    if (!content) return [];
+    
+    const aiTypes = ['wayneAI', 'consultingAI'];
+    const mentions = new Set();
+    const mentionRegex = /@(wayneAI|consultingAI)\b/g;
+    let match;
+    
+    while ((match = mentionRegex.exec(content)) !== null) {
+      if (aiTypes.includes(match[1])) {
+        mentions.add(match[1]);
+      }
+    }
+    
+    return Array.from(mentions);
+  }
+
+  // 게임 상태 확인 및 AI 응답 트리거 판단 함수 (마피아 게임 포함)
+  function shouldTriggerAIResponse(content, userId, roomId, participants = []) {
+    // AI 멘션이 있는 경우
+    const aiMentions = extractAIMentions(content);
+    if (aiMentions.length > 0) {
+      return { shouldTrigger: true, mentions: aiMentions, reason: 'mention' };
+    }
+    
+    // 마피아 게임 진행 중인지 확인
+    const mafiaGameState = aiService.getMafiaGameState(roomId);
+    if (mafiaGameState && mafiaGameState.isActive) {
+      // 마피아 게임 관련 명령어인지 확인
+      const mafiaCommands = ['토론시작', '투표시작'];
+      const isMafiaCommand = mafiaCommands.some(cmd => content.includes(cmd)) || 
+                            aiService.isVoteCommand(content);
+      
+      if (isMafiaCommand) {
+        return { 
+          shouldTrigger: true, 
+          mentions: ['wayneAI'], 
+          reason: 'mafia_game' 
+        };
+      }
+    }
+    
+    // 마피아 게임 시작 명령어
+    if (aiService.isMafiaGameCommand(content)) {
+      return { 
+        shouldTrigger: true, 
+        mentions: ['wayneAI'], 
+        reason: 'mafia_game_start' 
+      };
+    }
+    
+    // 기존 업다운 게임 진행 중인지 확인
+    const gameState = aiService.getGameState(userId, roomId);
+    if (gameState && gameState.isActive) {
+      if (aiService.isNumberGuess(content)) {
+        return { 
+          shouldTrigger: true, 
+          mentions: ['wayneAI'],
+          reason: 'game' 
+        };
+      }
+    }
+    
+    return { shouldTrigger: false };
+  }
+
+  // AI 응답 처리 함수 개선 (마피아 게임 통합)
+async function handleAIResponse(io, room, aiName, query, userId = null, roomId = null, participants = []) {
+  const messageId = `${aiName}-${Date.now()}`;
+  let accumulatedContent = '';
+  const timestamp = new Date();
+
+  // 스트리밍 세션 초기화
+  streamingSessions.set(messageId, {
+    room,
+    aiType: aiName,
+    content: '',
+    messageId,
+    timestamp,
+    lastUpdate: Date.now(),
+    reactions: {},
+    userId: userId
+  });
+  
+  logDebug('AI response started', {
+    messageId,
+    aiType: aiName,
+    room,
+    query,
+    userId
+  });
+
+  // 초기 상태 전송
+  io.to(room).emit('aiMessageStart', {
+    messageId,
+    aiType: aiName,
+    timestamp
+  });
+
+  try {
+    // AI 응답 생성 및 스트리밍 (참여자 정보 포함)
+    const response = await aiService.generateResponse(query, aiName, {
+      onStart: () => {
+        logDebug('AI generation started', {
+          messageId,
+          aiType: aiName
+        });
+      },
+      onChunk: async (chunk) => {
+        accumulatedContent += chunk.currentChunk || '';
+        
+        const session = streamingSessions.get(messageId);
+        if (session) {
+          session.content = accumulatedContent;
+          session.lastUpdate = Date.now();
+        }
+
+        io.to(room).emit('aiMessageChunk', {
+          messageId,
+          currentChunk: chunk.currentChunk,
+          fullContent: accumulatedContent,
+          isCodeBlock: chunk.isCodeBlock,
+          timestamp: new Date(),
+          aiType: aiName,
+          isComplete: false
+        });
+      },
+      onComplete: async (finalContent) => {
+        // 스트리밍 세션 정리
+        streamingSessions.delete(messageId);
+
+        // finalContent 처리 개선
+        let contentToSave = accumulatedContent; // 기본값으로 누적된 내용 사용
+        
+        if (finalContent) {
+          if (typeof finalContent === 'object' && finalContent.content) {
+            contentToSave = finalContent.content;
+          } else if (typeof finalContent === 'string') {
+            contentToSave = finalContent;
+          }
+        }
+
+        // 내용이 비어있는 경우 방지
+        if (!contentToSave || contentToSave.trim() === '') {
+          contentToSave = accumulatedContent || '응답을 생성하는 중 오류가 발생했습니다.';
+        }
+
+        // 데이터베이스에 AI 메시지 저장
+        const aiMessage = new Message({
+          sender: null,
+          room: room,
+          content: contentToSave,
+          type: 'ai',
+          aiType: aiName,
+          timestamp: timestamp,
+          reactions: {},
+          readers: []
+        });
+
+        await aiMessage.save();
+
+        // 완료 메시지 전송 - 수정된 부분
+        io.to(room).emit('aiMessageComplete', {
+          messageId,
+          fullContent: contentToSave,
+          timestamp: new Date(),
+          aiType: aiName,
+          dbMessage: {
+            _id: aiMessage._id,
+            sender: null,
+            room: room,
+            content: contentToSave,
+            type: 'ai',
+            aiType: aiName,
+            timestamp: aiMessage.timestamp,
+            reactions: {},
+            readers: []
+          }
+        });
+
+        logDebug('AI response completed', {
+          messageId,
+          aiType: aiName,
+          contentLength: contentToSave.length
+        });
+      },
+      onError: (error) => {
+        console.error('AI generation error:', error);
+        streamingSessions.delete(messageId);
+        
+        io.to(room).emit('aiMessageError', {
+          messageId,
+          error: error.message,
+          timestamp: new Date(),
+          aiType: aiName
+        });
+      }
+    }, userId, roomId, participants);
+
+    // 마피아 게임 시작 시 개인 메시지 전송 - 수정된 부분
+    if (response && typeof response === 'object' && response.sendPrivateMessages) {
+      // 약간의 지연을 추가하여 메인 메시지가 먼저 전송되도록 함
+      setTimeout(async () => {
+        const mafiaGameState = aiService.getMafiaGameState(roomId);
+        if (mafiaGameState) {
+          console.log('마피아 게임 개인 메시지 전송 시작:', {
+            roomId,
+            participantsCount: participants.length,
+            mafiaId: mafiaGameState.mafia,
+            citizensCount: mafiaGameState.citizens.length
+          });
+
+          // 마피아에게 역할 알림
+          const mafiaPlayer = participants.find(p => p.id === mafiaGameState.mafia);
+          if (mafiaPlayer) {
+            const mafiaSocket = findSocketByUserId(mafiaPlayer.id);
+            console.log('마피아 플레이어 찾기:', {
+              mafiaPlayerId: mafiaPlayer.id,
+              mafiaPlayerName: mafiaPlayer.name,
+              socketFound: !!mafiaSocket
+            });
+            
+            if (mafiaSocket) {
+              mafiaSocket.emit('privateMessage', {
+                from: { name: 'Wayne AI', id: 'wayneAI' },
+                content: `🕵️ **당신의 역할: 마피아**\n\n당신은 이 게임의 마피아입니다.\n시민들에게 들키지 않고 끝까지 살아남으세요!\n\n⚠️ 이 정보는 다른 플레이어에게 공개하지 마세요.`,
+                gameType: 'mafia',
+                timestamp: new Date()
+              });
+              console.log('마피아 역할 메시지 전송 완료:', mafiaPlayer.name);
+            }
+          }
+
+          // 시민들에게 역할 알림
+          let citizenMessageCount = 0;
+          mafiaGameState.citizens.forEach(citizenId => {
+            const citizenPlayer = participants.find(p => p.id === citizenId);
+            if (citizenPlayer) {
+              const citizenSocket = findSocketByUserId(citizenPlayer.id);
+              console.log('시민 플레이어 찾기:', {
+                citizenPlayerId: citizenPlayer.id,
+                citizenPlayerName: citizenPlayer.name,
+                socketFound: !!citizenSocket
+              });
+              
+              if (citizenSocket) {
+                citizenSocket.emit('privateMessage', {
+                  from: { name: 'Wayne AI', id: 'wayneAI' },
+                  content: `😇 **당신의 역할: 시민**\n\n당신은 선량한 시민입니다.\n토론과 투표를 통해 마피아를 찾아내세요!\n\n🎯 마피아가 누구인지 잘 관찰하고 추리해보세요.`,
+                  gameType: 'mafia',
+                  timestamp: new Date()
+                });
+                citizenMessageCount++;
+                console.log('시민 역할 메시지 전송 완료:', citizenPlayer.name);
+              }
+            }
+          });
+
+          console.log('개인 메시지 전송 완료:', {
+            totalParticipants: participants.length,
+            citizenMessageCount,
+            mafiaMessageCount: mafiaPlayer ? 1 : 0
+          });
+
+          // 마피아 게임 상태 업데이트
+          io.to(room).emit('mafiaGameStateUpdate', {
+            gameState: {
+              isActive: mafiaGameState.isActive,
+              phase: mafiaGameState.phase,
+              day: mafiaGameState.day,
+              alive: mafiaGameState.alive,
+              participants: mafiaGameState.participants
+            }
+          });
+        }
+      }, 1000); // 1초 지연
+    }
+
+  } catch (error) {
+    console.error('AI response handling error:', error);
+    streamingSessions.delete(messageId);
+    
+    io.to(room).emit('aiMessageError', {
+      messageId,
+      error: error.message,
+      timestamp: new Date(),
+      aiType: aiName
+    });
+  }
+}
 
   // 미들웨어: 소켓 연결 시 인증 처리
   io.use(async (socket, next) => {
@@ -410,6 +714,10 @@ module.exports = function(io) {
             isStreaming: true
           }));
 
+        // 게임 상태 조회
+        const gameState = aiService.getGameState(socket.user.id, roomId);
+        const mafiaGameState = aiService.getMafiaGameState(roomId);
+
         // 이벤트 발송
         socket.emit('joinRoomSuccess', {
           roomId,
@@ -417,7 +725,20 @@ module.exports = function(io) {
           messages,
           hasMore,
           oldestTimestamp,
-          activeStreams
+          activeStreams,
+          gameState: gameState && gameState.isActive ? {
+            isActive: gameState.isActive,
+            attempts: gameState.attempts,
+            lastGuess: gameState.lastGuess,
+            startTime: gameState.startTime
+          } : null,
+          mafiaGameState: mafiaGameState && mafiaGameState.isActive ? {
+            isActive: mafiaGameState.isActive,
+            phase: mafiaGameState.phase,
+            day: mafiaGameState.day,
+            alive: mafiaGameState.alive,
+            participants: mafiaGameState.participants
+          } : null
         });
 
         io.to(roomId).emit('message', joinMessage);
@@ -438,7 +759,7 @@ module.exports = function(io) {
       }
     });
     
-    // 메시지 전송 처리 
+    // 메시지 전송 처리 (마피아 게임 통합)
     socket.on('chatMessage', async (messageData) => {
       try {
         if (!socket.user) {
@@ -455,11 +776,11 @@ module.exports = function(io) {
           throw new Error('채팅방 정보가 없습니다.');
         }
 
-        // 채팅방 권한 확인
+        // 채팅방 권한 확인 및 참여자 정보 가져오기
         const chatRoom = await Room.findOne({
           _id: room,
           participants: socket.user.id
-        });
+        }).populate('participants', 'name email profileImage');
 
         if (!chatRoom) {
           throw new Error('채팅방 접근 권한이 없습니다.');
@@ -475,8 +796,14 @@ module.exports = function(io) {
           throw new Error('세션이 만료되었습니다. 다시 로그인해주세요.');
         }
 
-        // AI 응답 트리거 확인 (게임 상태 포함)
-        const triggerResult = shouldTriggerAIResponse(content, socket.user.id, room);
+        // AI 응답 트리거 판단 (마피아 게임 포함)
+        const triggerResult = shouldTriggerAIResponse(
+          content, 
+          socket.user.id, 
+          room, 
+          chatRoom.participants
+        );
+
         let message;
 
         logDebug('message received', {
@@ -557,12 +884,28 @@ module.exports = function(io) {
               query = content.replace(new RegExp(`@${ai}\\b`, 'g'), '').trim();
             }
             
-            // AI 응답 생성 (userId, roomId 전달)
-            await handleAIResponse(io, room, ai, query, socket.user.id, room);
+            // AI 응답 생성 (참여자 정보 포함)
+            await handleAIResponse(io, room, ai, query, socket.user.id, room, chatRoom.participants);
           }
         }
 
-        // 게임 상태 업데이트 (숫자 추측인 경우)
+        // 마피아 게임 상태 업데이트
+        if (triggerResult.reason === 'mafia_game' || triggerResult.reason === 'mafia_game_start') {
+          const mafiaGameState = aiService.getMafiaGameState(room);
+          if (mafiaGameState) {
+            io.to(room).emit('mafiaGameStateUpdate', {
+              gameState: {
+                isActive: mafiaGameState.isActive,
+                phase: mafiaGameState.phase,
+                day: mafiaGameState.day,
+                alive: mafiaGameState.alive,
+                participants: mafiaGameState.participants
+              }
+            });
+          }
+        }
+
+        // 기존 업다운 게임 상태 업데이트
         if (triggerResult.reason === 'game') {
           const gameState = aiService.getGameState(socket.user.id, room);
           if (gameState) {
@@ -592,6 +935,40 @@ module.exports = function(io) {
         socket.emit('error', {
           code: error.code || 'MESSAGE_ERROR',
           message: error.message || '메시지 전송 중 오류가 발생했습니다.'
+        });
+      }
+    });
+
+    // 개인 메시지 전송 (마피아 역할 전달용)
+    socket.on('sendPrivateMessage', async (data) => {
+      try {
+        const { targetUserId, content, gameType } = data;
+        
+        if (!socket.user) {
+          socket.emit('error', {
+            code: 'UNAUTHORIZED',
+            message: '인증되지 않은 사용자입니다.'
+          });
+          return;
+        }
+
+        // 대상 소켓 찾기
+        const targetSocket = findSocketByUserId(targetUserId);
+        
+        if (targetSocket) {
+          targetSocket.emit('privateMessage', {
+            from: socket.user,
+            content,
+            gameType,
+            timestamp: new Date()
+          });
+        }
+
+      } catch (error) {
+        console.error('Private message error:', error);
+        socket.emit('error', {
+          code: 'PRIVATE_MESSAGE_ERROR',
+          message: '개인 메시지 전송 중 오류가 발생했습니다.'
         });
       }
     });
@@ -842,246 +1219,92 @@ module.exports = function(io) {
       }
     });
 
-    // 게임 시작 이벤트
-    socket.on('startGame', async (data) => {
+    // 리액션 추가 (개선된 방식)
+    socket.on('addReaction', async ({ messageId, emoji, room }) => {
       try {
-        const { roomId, userId } = data;
-        
-        if (!socket.user || socket.user.id !== userId) {
+        if (!socket.user) {
           throw new Error('Unauthorized');
         }
+
+        const message = await Message.findById(messageId);
+        if (!message) {
+          throw new Error('메시지를 찾을 수 없습니다.');
+        }
+
+        // 리액션 추가
+        if (!message.reactions) {
+          message.reactions = {};
+        }
         
-        // 게임 초기화
-        const gameId = aiService.initializeGame(userId, roomId);
-        const gameState = aiService.getGameState(userId, roomId);
+        if (!message.reactions[emoji]) {
+          message.reactions[emoji] = [];
+        }
         
-        // 방의 모든 사용자에게 게임 상태 전송
-        io.to(roomId).emit('gameStateUpdate', {
-          gameState: {
-            isActive: gameState.isActive,
-            attempts: gameState.attempts,
-            startTime: gameState.startTime
+        // 이미 리액션한 경우 제거, 아니면 추가
+        const userIndex = message.reactions[emoji].indexOf(socket.user.id);
+        if (userIndex > -1) {
+          message.reactions[emoji].splice(userIndex, 1);
+          if (message.reactions[emoji].length === 0) {
+            delete message.reactions[emoji];
           }
-        });
-        
-        logDebug('game started', {
-          gameId,
-          userId,
-          roomId
+        } else {
+          message.reactions[emoji].push(socket.user.id);
+        }
+
+        await message.save();
+
+        // 업데이트된 리액션 정보 브로드캐스트
+        io.to(room).emit('reactionAdded', {
+          messageId,
+          reactions: message.reactions
         });
 
       } catch (error) {
-        console.error('Game start error:', error);
-        socket.emit('error', { message: '게임 시작 중 오류가 발생했습니다.' });
+        console.error('Add reaction error:', error);
+        socket.emit('error', {
+          message: error.message || '리액션 추가 중 오류가 발생했습니다.'
+        });
       }
     });
 
-    // 게임 종료 이벤트
-    socket.on('endGame', async (data) => {
+    // 리액션 제거
+    socket.on('removeReaction', async ({ messageId, emoji, room }) => {
       try {
-        const { roomId, userId } = data;
-        
-        if (!socket.user || socket.user.id !== userId) {
+        if (!socket.user) {
           throw new Error('Unauthorized');
         }
-        
-        aiService.endGame(userId, roomId);
-        
-        // 방의 모든 사용자에게 게임 종료 알림
-        io.to(roomId).emit('gameEnd', {
-          userId,
-          roomId
-        });
-        
-        logDebug('game ended', {
-          userId,
-          roomId
+
+        const message = await Message.findById(messageId);
+        if (!message) {
+          throw new Error('메시지를 찾을 수 없습니다.');
+        }
+
+        // 리액션 제거
+        if (message.reactions && message.reactions[emoji]) {
+          const userIndex = message.reactions[emoji].indexOf(socket.user.id);
+          if (userIndex > -1) {
+            message.reactions[emoji].splice(userIndex, 1);
+            if (message.reactions[emoji].length === 0) {
+              delete message.reactions[emoji];
+            }
+            await message.save();
+          }
+        }
+
+        // 업데이트된 리액션 정보 브로드캐스트
+        io.to(room).emit('reactionRemoved', {
+          messageId,
+          reactions: message.reactions
         });
 
       } catch (error) {
-        console.error('Game end error:', error);
-        socket.emit('error', { message: '게임 종료 중 오류가 발생했습니다.' });
+        console.error('Remove reaction error:', error);
+        socket.emit('error', {
+          message: error.message || '리액션 제거 중 오류가 발생했습니다.'
+        });
       }
     });
   });
-
-  // AI 멘션 추출 함수
-  function extractAIMentions(content) {
-    if (!content) return [];
-    
-    const aiTypes = ['wayneAI', 'consultingAI'];
-    const mentions = new Set();
-    const mentionRegex = /@(wayneAI|consultingAI)\b/g;
-    let match;
-    
-    while ((match = mentionRegex.exec(content)) !== null) {
-      if (aiTypes.includes(match[1])) {
-        mentions.add(match[1]);
-      }
-    }
-    
-    return Array.from(mentions);
-  }
-
-  // 게임 상태 확인 및 AI 응답 트리거 판단 함수
-  function shouldTriggerAIResponse(content, userId, roomId) {
-    // AI 멘션이 있는 경우
-    const aiMentions = extractAIMentions(content);
-    if (aiMentions.length > 0) {
-      return { shouldTrigger: true, mentions: aiMentions, reason: 'mention' };
-    }
-    
-    // 게임 진행 중인지 확인
-    const gameState = aiService.getGameState(userId, roomId);
-    if (gameState && gameState.isActive) {
-      // 숫자 입력인지 확인
-      if (aiService.isNumberGuess(content)) {
-        return { 
-          shouldTrigger: true, 
-          mentions: ['wayneAI'], // 기본적으로 wayneAI가 게임 진행
-          reason: 'game' 
-        };
-      }
-    }
-    
-    return { shouldTrigger: false };
-  }
-
-  // AI 응답 처리 함수 개선 (게임 통합)
-  async function handleAIResponse(io, room, aiName, query, userId = null, roomId = null) {
-    const messageId = `${aiName}-${Date.now()}`;
-    let accumulatedContent = '';
-    const timestamp = new Date();
-
-    // 스트리밍 세션 초기화
-    streamingSessions.set(messageId, {
-      room,
-      aiType: aiName,
-      content: '',
-      messageId,
-      timestamp,
-      lastUpdate: Date.now(),
-      reactions: {},
-      userId: userId // 사용자 ID 추가
-    });
-    
-    logDebug('AI response started', {
-      messageId,
-      aiType: aiName,
-      room,
-      query,
-      userId
-    });
-
-    // 초기 상태 전송
-    io.to(room).emit('aiMessageStart', {
-      messageId,
-      aiType: aiName,
-      timestamp
-    });
-
-    try {
-      // AI 응답 생성 및 스트리밍 (userId, roomId 추가)
-      await aiService.generateResponse(query, aiName, {
-        onStart: () => {
-          logDebug('AI generation started', {
-            messageId,
-            aiType: aiName
-          });
-        },
-        onChunk: async (chunk) => {
-          accumulatedContent += chunk.currentChunk || '';
-          
-          const session = streamingSessions.get(messageId);
-          if (session) {
-            session.content = accumulatedContent;
-            session.lastUpdate = Date.now();
-          }
-
-          io.to(room).emit('aiMessageChunk', {
-            messageId,
-            currentChunk: chunk.currentChunk,
-            fullContent: accumulatedContent,
-            isCodeBlock: chunk.isCodeBlock,
-            timestamp: new Date(),
-            aiType: aiName,
-            isComplete: false
-          });
-        },
-        onComplete: async (finalContent) => {
-          // 스트리밍 세션 정리
-          streamingSessions.delete(messageId);
-
-          // AI 메시지 저장
-          const aiMessage = await Message.create({
-            room,
-            content: finalContent.content,
-            type: 'ai',
-            aiType: aiName,
-            timestamp: new Date(),
-            reactions: {},
-            metadata: {
-              query,
-              generationTime: Date.now() - timestamp,
-              completionTokens: finalContent.completionTokens,
-              totalTokens: finalContent.totalTokens,
-              userId: userId // 게임 관련 사용자 정보
-            }
-          });
-
-          // 완료 메시지 전송
-          io.to(room).emit('aiMessageComplete', {
-            messageId,
-            _id: aiMessage._id,
-            content: finalContent.content,
-            aiType: aiName,
-            timestamp: new Date(),
-            isComplete: true,
-            query,
-            reactions: {}
-          });
-
-          logDebug('AI response completed', {
-            messageId,
-            aiType: aiName,
-            contentLength: finalContent.content.length,
-            generationTime: Date.now() - timestamp
-          });
-        },
-        onError: (error) => {
-          streamingSessions.delete(messageId);
-          console.error('AI response error:', error);
-          
-          io.to(room).emit('aiMessageError', {
-            messageId,
-            error: error.message || 'AI 응답 생성 중 오류가 발생했습니다.',
-            aiType: aiName
-          });
-
-          logDebug('AI response error', {
-            messageId,
-            aiType: aiName,
-            error: error.message
-          });
-        }
-      }, userId, roomId); // userId, roomId 파라미터 추가
-    } catch (error) {
-      streamingSessions.delete(messageId);
-      console.error('AI service error:', error);
-      
-      io.to(room).emit('aiMessageError', {
-        messageId,
-        error: error.message || 'AI 서비스 오류가 발생했습니다.',
-        aiType: aiName
-      });
-
-      logDebug('AI service error', {
-        messageId,
-        aiType: aiName,
-        error: error.message
-      });
-    }
-  }
 
   return io;
 };
