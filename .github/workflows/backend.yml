@@ -37,7 +37,7 @@ jobs:
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            docker pull yourname/your-app:latest
-            docker stop your-app || true
-            docker rm your-app || true
-            docker run -d --name your-app -p 3000:3000 yourname/your-app:latest
+            docker pull gyungm2n/team19:latest
+            docker stop team19 || true
+            docker rm team19 || true
+            docker run -d --name team19 -p 3000:3000 gyungm2n/team19:latest
