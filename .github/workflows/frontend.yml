@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 18
 
-      - name: 🧪 Create .env.production
+      - name: 🧪 Create .env
         working-directory: frontend
         run: |
           echo "NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}" >> .env
