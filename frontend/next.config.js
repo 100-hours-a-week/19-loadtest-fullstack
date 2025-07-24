@@ -10,11 +10,6 @@ const nextConfig = {
   images: {
     unoptimized: true, // next/image 사용 시 필수
   },
-  env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
-    NEXT_PUBLIC_ENCRYPTION_KEY: process.env.NEXT_PUBLIC_ENCRYPTION_KEY,
-    NEXT_PUBLIC_PASSWORD_SALT: process.env.NEXT_PUBLIC_PASSWORD_SALT
-  },
   ...(process.env.NODE_ENV === 'development' && {
     experimental: {
       forceSwcTransforms: true
