@@ -213,29 +213,6 @@ const FileMessage = ({
     const originalname = getDecodedFilename(msg.file?.originalname || 'Unknown File');
     const size = fileService.formatFileSize(msg.file?.size || 0);
     
-    const FileActions = ({ handleViewInNewTab, handleFileDownload }) => (
-      <div className="file-actions mt-2 pt-2 border-t border-gray-200">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={handleViewInNewTab}
-          title="새 탭에서 보기"
-        >
-          <ExternalLink size={16} />
-          <span>새 탭에서 보기</span>
-        </Button>
-
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={handleFileDownload}
-          title="다운로드"
-        >
-          <Download size={16} />
-          <span>다운로드</span>
-        </Button>
-      </div>
-    );
 
     const previewWrapperClass = 
       "overflow-hidden";
@@ -243,96 +220,138 @@ const FileMessage = ({
       "flex items-center gap-3 p-1 mt-2";
 
     if (mimetype.startsWith('image/')) {
-      return (
-        <div className={previewWrapperClass}>
-          {renderImagePreview(originalname)}
-          <div className={fileInfoClass}>
-            <div className="flex-1 min-w-0">
-              <Text typography="body2" className="font-medium truncate">{getFileIcon()} {originalname}</Text>
-              <span className="text-sm text-muted">{size}</span>
-            </div>
-          </div>
-          <FileActions 
-            handleViewInNewTab={handleViewInNewTab}
-            handleFileDownload={handleFileDownload}
-          />
-        </div>
-      );
+      return renderImage({ previewWrapperClass, fileInfoClass, originalname, size, getFileIcon, handleViewInNewTab, handleFileDownload, renderImagePreview });
     }
-
+    
     if (mimetype.startsWith('video/')) {
-      return (
-        <div className={previewWrapperClass}>
-          <div>
-            {previewUrl ? (
-              <video 
-                className="object-cover rounded-sm"
-                controls
-                preload="metadata"
-                aria-label={`${originalname} 비디오`}
-                crossOrigin="use-credentials"
-              >
-                <source src={previewUrl} type={mimetype} />
-                <track kind="captions" />
-                비디오를 재생할 수 없습니다.
-              </video>
-            ) : (
-              <div className="flex items-center justify-center h-full">
-                <Film className="w-8 h-8 text-gray-400" />
-              </div>
-            )}
-          </div>
-          <div className={fileInfoClass}>
-            <div className="flex-1 min-w-0">
-              <Text typography="body2" className="font-medium truncate">{getFileIcon()} {originalname}</Text>
-              <span className="text-sm text-muted">{size}</span>
-            </div>
-          </div>
-          <FileActions />
-        </div>
-      );
+      return renderVideo({ previewWrapperClass, fileInfoClass, originalname, size, mimetype, previewUrl, getFileIcon, handleViewInNewTab, handleFileDownload });
     }
-
+    
     if (mimetype.startsWith('audio/')) {
-      return (
-        <div className={previewWrapperClass}>
-          <div className={fileInfoClass}>
-            <div className="flex-1 min-w-0">
-              <Text typography="body2" className="font-medium truncate">{getFileIcon()} {originalname}</Text>
-              <span className="text-sm text-muted">{size}</span>
-            </div>
-          </div>
-          <div className="px-3 pb-3">
-            {previewUrl && (
-              <audio 
-                className="w-full"
-                controls
-                preload="metadata"
-                aria-label={`${originalname} 오디오`}
-                crossOrigin="use-credentials"
-              >
-                <source src={previewUrl} type={mimetype} />
-                오디오를 재생할 수 없습니다.
-              </audio>
-            )}
-          </div>
-          <FileActions />
-        </div>
-      );
+      return renderAudio({ previewWrapperClass, fileInfoClass, originalname, size, mimetype, previewUrl, getFileIcon, handleViewInNewTab, handleFileDownload });
     }
-
-    return (
-      <div className={previewWrapperClass}>
-        <div className={fileInfoClass}>
-          <div className="flex-1 min-w-0">
-            <div className="font-medium truncate">{getFileIcon()} {originalname}</div>
-            <Text typography="body2" as="span">{size}</Text>
-          </div>
-        </div>
-        <FileActions />
-      </div>
-    );
+    
+    return renderDefault({ previewWrapperClass, fileInfoClass, originalname, size, getFileIcon, handleViewInNewTab, handleFileDownload });
+    
   };
+
+  const FileActions = ({ handleViewInNewTab, handleFileDownload }) => (
+    <div className="file-actions mt-2 pt-2 border-t border-gray-200">
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={handleViewInNewTab}
+        title="새 탭에서 보기"
+      >
+        <ExternalLink size={16} />
+        <span>새 탭에서 보기</span>
+      </Button>
+
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={handleFileDownload}
+        title="다운로드"
+      >
+        <Download size={16} />
+        <span>다운로드</span>
+      </Button>
+    </div>
+  );
+  
+  const renderImage = ({ previewWrapperClass, fileInfoClass, originalname, size, getFileIcon, handleViewInNewTab, handleFileDownload, renderImagePreview }) => (
+    <div className={previewWrapperClass}>
+      {renderImagePreview(originalname)}
+      <div className={fileInfoClass}>
+        <div className="flex-1 min-w-0">
+          <Text typography="body2" className="font-medium truncate">{getFileIcon()} {originalname}</Text>
+          <span className="text-sm text-muted">{size}</span>
+        </div>
+      </div>
+      <FileActions 
+        handleViewInNewTab={handleViewInNewTab}
+        handleFileDownload={handleFileDownload}
+      />
+    </div>
+  );
+  
+  const renderVideo = ({ previewWrapperClass, fileInfoClass, originalname, size, mimetype, previewUrl, getFileIcon, handleViewInNewTab, handleFileDownload }) => (
+    <div className={previewWrapperClass}>
+      <div>
+        {previewUrl ? (
+          <video 
+            className="object-cover rounded-sm"
+            controls
+            preload="metadata"
+            aria-label={`${originalname} 비디오`}
+            crossOrigin="use-credentials"
+          >
+            <source src={previewUrl} type={mimetype} />
+            <track kind="captions" />
+            비디오를 재생할 수 없습니다.
+          </video>
+        ) : (
+          <div className="flex items-center justify-center h-full">
+            <Film className="w-8 h-8 text-gray-400" />
+          </div>
+        )}
+      </div>
+      <div className={fileInfoClass}>
+        <div className="flex-1 min-w-0">
+          <Text typography="body2" className="font-medium truncate">{getFileIcon()} {originalname}</Text>
+          <span className="text-sm text-muted">{size}</span>
+        </div>
+      </div>
+      <FileActions 
+        handleViewInNewTab={handleViewInNewTab}
+        handleFileDownload={handleFileDownload}
+      />        
+    </div>
+  );
+  
+  const renderAudio = ({ previewWrapperClass, fileInfoClass, originalname, size, mimetype, previewUrl, getFileIcon, handleViewInNewTab, handleFileDownload }) => (
+    <div className={previewWrapperClass}>
+      <div className={fileInfoClass}>
+        <div className="flex-1 min-w-0">
+          <Text typography="body2" className="font-medium truncate">{getFileIcon()} {originalname}</Text>
+          <span className="text-sm text-muted">{size}</span>
+        </div>
+      </div>
+      <div className="px-3 pb-3">
+        {previewUrl && (
+          <audio 
+            className="w-full"
+            controls
+            preload="metadata"
+            aria-label={`${originalname} 오디오`}
+            crossOrigin="use-credentials"
+          >
+            <source src={previewUrl} type={mimetype} />
+            오디오를 재생할 수 없습니다.
+          </audio>
+        )}
+      </div>
+      <FileActions 
+        handleViewInNewTab={handleViewInNewTab}
+        handleFileDownload={handleFileDownload}
+      />
+    </div>
+  );
+  
+  const renderDefault = ({ previewWrapperClass, fileInfoClass, originalname, size, getFileIcon, handleViewInNewTab, handleFileDownload }) => (
+    <div className={previewWrapperClass}>
+      <div className={fileInfoClass}>
+        <div className="flex-1 min-w-0">
+          <div className="font-medium truncate">{getFileIcon()} {originalname}</div>
+          <Text typography="body2" as="span">{size}</Text>
+        </div>
+      </div>
+      <FileActions 
+        handleViewInNewTab={handleViewInNewTab}
+        handleFileDownload={handleFileDownload}
+      />
+    </div>
+  );
 
   return (
     <div className="messages">
