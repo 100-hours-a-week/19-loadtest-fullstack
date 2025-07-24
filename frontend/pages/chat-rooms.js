@@ -10,7 +10,6 @@ import authService from '../services/authService';
 import axiosInstance from '../services/axios';
 import { withAuth } from '../middleware/withAuth';
 import { Toast } from '../components/Toast';
-
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 const CONNECTION_STATUS = {
@@ -586,6 +585,8 @@ function ChatRoomsComponent() {
         errorMessage = '채팅방을 찾을 수 없습니다.';
       } else if (error.response?.status === 403) {
         errorMessage = '채팅방 입장 권한이 없습니다.';
+      } else if (error.response?.status === 400) {
+        errorMessage = '비밀번호가 틀렸습니다.';
       }
       
       setError({
@@ -598,9 +599,116 @@ function ChatRoomsComponent() {
     }
   };
 
+  const handleJoinSecretRoom = async (roomId) => {
+    if (connectionStatus !== CONNECTION_STATUS.CONNECTED) {
+      setError({
+        title: '채팅방 입장 실패',
+        message: '서버와 연결이 끊어져 있습니다.',
+        type: 'danger'
+      });
+      return;
+    }
+  
+    const password = prompt('비밀번호를 입력하세요');
+    if (!password) {
+      setError({
+        title: '입장 취소됨',
+        message: '비밀번호가 입력되지 않았습니다.',
+        type: 'warning'
+      });
+      return;
+    }
+  
+    setJoiningRoom(true);
+  
+    try {
+      const response = await axiosInstance.post(
+        `/api/rooms/${roomId}/join`,
+        { password }, // 👉 여기에서 password를 담아 전송
+        { timeout: 5000 }
+      );
+  
+      if (response.data.success) {
+        router.push(`/chat?room=${roomId}`);
+      }
+    } catch (error) {
+      console.error('Room join error:', error);
+  
+      let errorMessage = '입장에 실패했습니다.';
+      if (error.response?.status === 404) {
+        errorMessage = '채팅방을 찾을 수 없습니다.';
+      } else if (error.response?.status === 403) {
+        errorMessage = '비밀번호가 틀렸습니다.';
+      }
+  
+      setError({
+        title: '채팅방 입장 실패',
+        message: error.response?.data?.message || errorMessage,
+        type: 'danger'
+      });
+    } finally {
+      setJoiningRoom(false);
+    }
+  };  
+
   const renderRoomsTable = () => {
     if (!rooms || rooms.length === 0) return null;
     
+    // return (
+    //   <StyledTable>
+    //     <StyledTableHead>
+    //       <StyledTableRow>
+    //         <StyledTableHeader width="45%">채팅방</StyledTableHeader>
+    //         <StyledTableHeader width="15%">참여자</StyledTableHeader>
+    //         <StyledTableHeader width="25%">생성일</StyledTableHeader>
+    //         <StyledTableHeader width="15%">액션</StyledTableHeader>
+    //       </StyledTableRow>
+    //     </StyledTableHead>
+    //     <StyledTableBody>
+    //       {rooms.map((room) => (
+    //         <StyledTableRow key={room._id}>
+    //           <StyledTableCell>
+    //             <Text typography="body1" style={{ fontWeight: 500, marginBottom: 'var(--vapor-space-050)' }}>{room.name}</Text>
+    //             {room.hasPassword && (
+    //               <HStack gap="050" align="center">
+    //                 <LockIcon size={16} style={{ color: 'var(--vapor-color-warning)' }} />
+    //                 <Text typography="body1" style={{ color: 'var(--vapor-color-warning)' }}>비밀번호 필요</Text>
+    //               </HStack>
+    //             )}
+    //           </StyledTableCell>
+    //           <StyledTableCell>
+    //             <Badge color="primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--vapor-space-100)' }}>
+    //               <GroupIcon size={16} />
+    //               <Text typography="body1" style={{ color: 'inherit' }}>{room.participants?.length || 0}</Text>
+    //             </Badge>
+    //           </StyledTableCell>
+    //           <StyledTableCell>
+    //             <Text typography="body1" style={{ color: 'var(--vapor-color-text-muted)' }}>
+    //               {new Date(room.createdAt).toLocaleString('ko-KR', {
+    //                 year: 'numeric',
+    //                 month: '2-digit',
+    //                 day: '2-digit',
+    //                 hour: '2-digit',
+    //                 minute: '2-digit'
+    //               })}
+    //             </Text>
+    //           </StyledTableCell>
+    //           <StyledTableCell>
+    //             <Button
+    //               color="primary"
+    //               variant="outline"
+    //               size="md"
+    //               onClick={() => handleJoinRoom(room._id)}
+    //               disabled={connectionStatus !== CONNECTION_STATUS.CONNECTED}
+    //             >
+    //               입장
+    //             </Button>
+    //           </StyledTableCell>
+    //         </StyledTableRow>
+    //       ))}
+    //     </StyledTableBody>
+    //   </StyledTable>
+    // );
     return (
       <StyledTable>
         <StyledTableHead>
@@ -615,7 +723,15 @@ function ChatRoomsComponent() {
           {rooms.map((room) => (
             <StyledTableRow key={room._id}>
               <StyledTableCell>
-                <Text typography="body1" style={{ fontWeight: 500, marginBottom: 'var(--vapor-space-050)' }}>{room.name}</Text>
+                <Text
+                  typography="body1"
+                  style={{
+                    fontWeight: 500,
+                    marginBottom: 'var(--vapor-space-050)'
+                  }}
+                >
+                  {room.name}
+                </Text>
                 {room.hasPassword && (
                   <HStack gap="050" align="center">
                     <LockIcon size={16} style={{ color: 'var(--vapor-color-warning)' }} />
@@ -624,9 +740,18 @@ function ChatRoomsComponent() {
                 )}
               </StyledTableCell>
               <StyledTableCell>
-                <Badge color="primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--vapor-space-100)' }}>
+                <Badge
+                  color="primary"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 'var(--vapor-space-100)'
+                  }}
+                >
                   <GroupIcon size={16} />
-                  <Text typography="body1" style={{ color: 'inherit' }}>{room.participants?.length || 0}</Text>
+                  <Text typography="body1" style={{ color: 'inherit' }}>
+                    {room.participants?.length || 0}
+                  </Text>
                 </Badge>
               </StyledTableCell>
               <StyledTableCell>
@@ -645,7 +770,11 @@ function ChatRoomsComponent() {
                   color="primary"
                   variant="outline"
                   size="md"
-                  onClick={() => handleJoinRoom(room._id)}
+                  onClick={() =>
+                    room.hasPassword
+                      ? handleJoinSecretRoom(room._id)
+                      : handleJoinRoom(room._id)
+                  }
                   disabled={connectionStatus !== CONNECTION_STATUS.CONNECTED}
                 >
                   입장
@@ -655,7 +784,7 @@ function ChatRoomsComponent() {
           ))}
         </StyledTableBody>
       </StyledTable>
-    );
+    );    
   };
 
 

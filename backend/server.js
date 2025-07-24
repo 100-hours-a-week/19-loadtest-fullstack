@@ -10,7 +10,7 @@ const routes = require('./routes');
 
 const app = express();
 const server = http.createServer(app);
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 8080;
 
 // trust proxy 설정 추가
 app.set('trust proxy', 1);
@@ -27,7 +27,8 @@ const corsOptions = {
     'https://localhost:3001',
     'https://localhost:3002',
     'http://0.0.0.0:3000',
-    'https://0.0.0.0:3000'
+    'https://0.0.0.0:3000',
+    'https://chat.goorm-ktb-019.goorm.team/'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],

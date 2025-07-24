@@ -307,6 +307,10 @@ const ChatInput = forwardRef(({
   }, [message, setMessage, setShowMentionList, messageInputRef]);
 
   const handleKeyDown = useCallback((e) => {
+    if (e.nativeEvent.isComposing) {
+      return;
+    }
+    
     if (showMentionList) {
       const participants = getFilteredParticipants(room); // room 객체 전달
       const participantsCount = participants.length;
@@ -376,8 +380,21 @@ const ChatInput = forwardRef(({
     let newCursorPos;
     let newSelectionStart;
     let newSelectionEnd;
-
-    if (markdown.includes('\n')) {
+  
+    if (markdown.includes('](') && markdown.startsWith('[')) {
+      if (selectedText) {
+        newText = message.substring(0, start) + `[${selectedText}](url)` + message.substring(end);
+        newSelectionStart = start + selectedText.length + 3;
+        newSelectionEnd = newSelectionStart + 3;
+        newCursorPos = newSelectionEnd;
+      } else {
+        newText = message.substring(0, start) + '[텍스트](url)' + message.substring(end);
+        newSelectionStart = start + 1;
+        newSelectionEnd = newSelectionStart + 3;
+        newCursorPos = newSelectionEnd;
+      }
+    }
+    else if (markdown.includes('\n')) {
       newText = message.substring(0, start) +
                 markdown.replace('\n\n', '\n' + selectedText + '\n') +
                 message.substring(end);
@@ -417,7 +434,7 @@ const ChatInput = forwardRef(({
       if (messageInputRef.current) {
         input.focus();
         input.setSelectionRange(newSelectionStart, newSelectionEnd);
-        if (selectedText) {
+        if (selectedText && !markdown.includes('](')) {
           input.setSelectionRange(newCursorPos, newCursorPos);
         }
       }

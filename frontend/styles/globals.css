@@ -91,14 +91,16 @@ body {
 html,
 body {
   height: 100vh;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   margin: 0;
   padding: 0;
 }
 
 #__next {
   height: 100vh;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* Auth Layout */
@@ -504,6 +506,14 @@ body {
 
 .message-content .md-list-item, .message-content .task-list-item {
   margin: var(--vapor-space-050) 0;
+}
+
+.message-content .md-list.md-ul {
+  list-style-type: disc;
+}
+
+.message-content .md-list.md-ol {
+  list-style-type: decimal;
 }
 
 /* Code blocks */
