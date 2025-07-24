@@ -10,7 +10,6 @@ import authService from '../services/authService';
 import axiosInstance from '../services/axios';
 import { withAuth } from '../middleware/withAuth';
 import { Toast } from '../components/Toast';
-
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 const CONNECTION_STATUS = {
@@ -586,6 +585,8 @@ function ChatRoomsComponent() {
         errorMessage = '채팅방을 찾을 수 없습니다.';
       } else if (error.response?.status === 403) {
         errorMessage = '채팅방 입장 권한이 없습니다.';
+      } else if (error.response?.status === 400) {
+        errorMessage = '비밀번호가 틀렸습니다.';
       }
       
       setError({
