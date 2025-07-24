@@ -1,4 +1,4 @@
-# 1단계: 빌드 스테이지
+# 1단계: 종속성 설치용 빌더
 FROM node:18-alpine AS builder
 
 WORKDIR /app
@@ -7,9 +7,8 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
-RUN npm run build
 
-# 2단계: 실행 스테이지
+# 2단계: 실행용 이미지 (빌드 없음)
 FROM node:18-alpine
 
 WORKDIR /app
@@ -17,4 +16,5 @@ WORKDIR /app
 COPY --from=builder /app .
 
 EXPOSE 3000
+
 CMD ["npm", "start"]
