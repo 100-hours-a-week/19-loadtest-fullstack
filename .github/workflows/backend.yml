@@ -13,6 +13,18 @@ jobs:
       - name: ✅ Checkout repository
         uses: actions/checkout@v4
 
+      - name: 📝 Create .env.production file
+        working-directory: ./backend
+        run: |
+          echo "MONGO_URI=${{ secrets.MONGO_URI }}" >> .env.production
+          echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env.production
+          echo "REDIS_HOST=${{ secrets.REDIS_HOST }}" >> .env.production
+          echo "REDIS_PORT=${{ secrets.REDIS_PORT }}" >> .env.production
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env.production
+          echo "ENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}" >> .env.production
+          echo "PASSWORD_SALT=${{ secrets.PASSWORD_SALT }}" >> .env.production
+          echo "NODE_ENV=production" >> .env.production
+
       - name: 🐳 Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
