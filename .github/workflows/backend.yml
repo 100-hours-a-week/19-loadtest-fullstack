@@ -28,7 +28,7 @@ jobs:
           context: ./backend
           file: ./backend/Dockerfile
           push: true
-          tags: yourname/your-app:latest
+          tags: gyungm2n/team19:latest
 
       - name: 📡 Connect to EC2 and pull+restart container
         uses: appleboy/ssh-action@v1.0.0
