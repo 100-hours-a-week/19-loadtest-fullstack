@@ -438,7 +438,7 @@ module.exports = function(io) {
       }
     });
     
-    // 메시지 전송 처리
+    // 메시지 전송 처리 
     socket.on('chatMessage', async (messageData) => {
       try {
         if (!socket.user) {
@@ -475,8 +475,8 @@ module.exports = function(io) {
           throw new Error('세션이 만료되었습니다. 다시 로그인해주세요.');
         }
 
-        // AI 멘션 확인
-        const aiMentions = extractAIMentions(content);
+        // AI 응답 트리거 확인 (게임 상태 포함)
+        const triggerResult = shouldTriggerAIResponse(content, socket.user.id, room);
         let message;
 
         logDebug('message received', {
@@ -484,7 +484,7 @@ module.exports = function(io) {
           room,
           userId: socket.user.id,
           hasFileData: !!fileData,
-          hasAIMentions: aiMentions.length
+          triggerResult
         });
 
         // 메시지 타입별 처리
@@ -547,11 +547,33 @@ module.exports = function(io) {
 
         io.to(room).emit('message', message);
 
-        // AI 멘션이 있는 경우 AI 응답 생성
-        if (aiMentions.length > 0) {
-          for (const ai of aiMentions) {
-            const query = content.replace(new RegExp(`@${ai}\\b`, 'g'), '').trim();
-            await handleAIResponse(io, room, ai, query);
+        // AI 응답 트리거 (게임 및 멘션 처리)
+        if (triggerResult.shouldTrigger) {
+          for (const ai of triggerResult.mentions) {
+            let query = content;
+            
+            // 멘션인 경우 @AI 제거, 게임인 경우 그대로 유지
+            if (triggerResult.reason === 'mention') {
+              query = content.replace(new RegExp(`@${ai}\\b`, 'g'), '').trim();
+            }
+            
+            // AI 응답 생성 (userId, roomId 전달)
+            await handleAIResponse(io, room, ai, query, socket.user.id, room);
+          }
+        }
+
+        // 게임 상태 업데이트 (숫자 추측인 경우)
+        if (triggerResult.reason === 'game') {
+          const gameState = aiService.getGameState(socket.user.id, room);
+          if (gameState) {
+            io.to(room).emit('gameStateUpdate', {
+              gameState: {
+                isActive: gameState.isActive,
+                attempts: gameState.attempts,
+                lastGuess: gameState.lastGuess,
+                startTime: gameState.startTime
+              }
+            });
           }
         }
 
@@ -560,7 +582,9 @@ module.exports = function(io) {
         logDebug('message processed', {
           messageId: message._id,
           type: message.type,
-          room
+          room,
+          aiTriggered: triggerResult.shouldTrigger,
+          triggerReason: triggerResult.reason
         });
 
       } catch (error) {
@@ -817,6 +841,68 @@ module.exports = function(io) {
         });
       }
     });
+
+    // 게임 시작 이벤트
+    socket.on('startGame', async (data) => {
+      try {
+        const { roomId, userId } = data;
+        
+        if (!socket.user || socket.user.id !== userId) {
+          throw new Error('Unauthorized');
+        }
+        
+        // 게임 초기화
+        const gameId = aiService.initializeGame(userId, roomId);
+        const gameState = aiService.getGameState(userId, roomId);
+        
+        // 방의 모든 사용자에게 게임 상태 전송
+        io.to(roomId).emit('gameStateUpdate', {
+          gameState: {
+            isActive: gameState.isActive,
+            attempts: gameState.attempts,
+            startTime: gameState.startTime
+          }
+        });
+        
+        logDebug('game started', {
+          gameId,
+          userId,
+          roomId
+        });
+
+      } catch (error) {
+        console.error('Game start error:', error);
+        socket.emit('error', { message: '게임 시작 중 오류가 발생했습니다.' });
+      }
+    });
+
+    // 게임 종료 이벤트
+    socket.on('endGame', async (data) => {
+      try {
+        const { roomId, userId } = data;
+        
+        if (!socket.user || socket.user.id !== userId) {
+          throw new Error('Unauthorized');
+        }
+        
+        aiService.endGame(userId, roomId);
+        
+        // 방의 모든 사용자에게 게임 종료 알림
+        io.to(roomId).emit('gameEnd', {
+          userId,
+          roomId
+        });
+        
+        logDebug('game ended', {
+          userId,
+          roomId
+        });
+
+      } catch (error) {
+        console.error('Game end error:', error);
+        socket.emit('error', { message: '게임 종료 중 오류가 발생했습니다.' });
+      }
+    });
   });
 
   // AI 멘션 추출 함수
@@ -837,8 +923,32 @@ module.exports = function(io) {
     return Array.from(mentions);
   }
 
-  // AI 응답 처리 함수 개선
-  async function handleAIResponse(io, room, aiName, query) {
+  // 게임 상태 확인 및 AI 응답 트리거 판단 함수
+  function shouldTriggerAIResponse(content, userId, roomId) {
+    // AI 멘션이 있는 경우
+    const aiMentions = extractAIMentions(content);
+    if (aiMentions.length > 0) {
+      return { shouldTrigger: true, mentions: aiMentions, reason: 'mention' };
+    }
+    
+    // 게임 진행 중인지 확인
+    const gameState = aiService.getGameState(userId, roomId);
+    if (gameState && gameState.isActive) {
+      // 숫자 입력인지 확인
+      if (aiService.isNumberGuess(content)) {
+        return { 
+          shouldTrigger: true, 
+          mentions: ['wayneAI'], // 기본적으로 wayneAI가 게임 진행
+          reason: 'game' 
+        };
+      }
+    }
+    
+    return { shouldTrigger: false };
+  }
+
+  // AI 응답 처리 함수 개선 (게임 통합)
+  async function handleAIResponse(io, room, aiName, query, userId = null, roomId = null) {
     const messageId = `${aiName}-${Date.now()}`;
     let accumulatedContent = '';
     const timestamp = new Date();
@@ -851,14 +961,16 @@ module.exports = function(io) {
       messageId,
       timestamp,
       lastUpdate: Date.now(),
-      reactions: {}
+      reactions: {},
+      userId: userId // 사용자 ID 추가
     });
     
     logDebug('AI response started', {
       messageId,
       aiType: aiName,
       room,
-      query
+      query,
+      userId
     });
 
     // 초기 상태 전송
@@ -869,7 +981,7 @@ module.exports = function(io) {
     });
 
     try {
-      // AI 응답 생성 및 스트리밍
+      // AI 응답 생성 및 스트리밍 (userId, roomId 추가)
       await aiService.generateResponse(query, aiName, {
         onStart: () => {
           logDebug('AI generation started', {
@@ -912,7 +1024,8 @@ module.exports = function(io) {
               query,
               generationTime: Date.now() - timestamp,
               completionTokens: finalContent.completionTokens,
-              totalTokens: finalContent.totalTokens
+              totalTokens: finalContent.totalTokens,
+              userId: userId // 게임 관련 사용자 정보
             }
           });
 
@@ -951,7 +1064,7 @@ module.exports = function(io) {
             error: error.message
           });
         }
-      });
+      }, userId, roomId); // userId, roomId 파라미터 추가
     } catch (error) {
       streamingSessions.delete(messageId);
       console.error('AI service error:', error);
