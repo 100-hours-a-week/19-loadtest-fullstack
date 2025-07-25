@@ -651,14 +651,14 @@ module.exports = function(io) {
       }
 
       // 이미 연결된 사용자인지 확인
-      // const existingSocketId = connectedUsers.get(decoded.user.id);
-      // if (existingSocketId) {
-      //   const existingSocket = io.sockets.sockets.get(existingSocketId);
-      //   if (existingSocket) {
-      //     // 중복 로그인 처리
-      //     await handleDuplicateLogin(existingSocket, socket);
-      //   }
-      // }
+      const existingSocketId = connectedUsers.get(decoded.user.id);
+      if (existingSocketId) {
+        const existingSocket = io.sockets.sockets.get(existingSocketId);
+        if (existingSocket) {
+          // 중복 로그인 처리
+          await handleDuplicateLogin(existingSocket, socket);
+        }
+      }
 
       const validationResult = await SessionService.validateSession(decoded.user.id, sessionId);
       if (!validationResult.isValid) {
